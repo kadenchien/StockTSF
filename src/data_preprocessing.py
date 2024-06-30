@@ -15,4 +15,4 @@ def preprocess_data(data_path):
 
 if __name__ == "__main__":
     scaled_data, scaler = preprocess_data('data/raw/stock_data.csv')
-    print(scaled_data[:5])
+    print(scaled_data[:10])
