@@ -1,18 +1,13 @@
-import pandas as pd
+import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 
-def preprocess_data(data_path):
-    df = pd.read_csv(data_path, index_col='Date', parse_dates=True)
+def preprocess_data(data, look_back=60):
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data)
     
-    # Use only 'Close' price for this example
-    df = df[['Close']]
+    X, y = [], []
+    for i in range(look_back, len(scaled_data)):
+        X.append(scaled_data[i-look_back:i])
+        y.append(scaled_data[i, 0])
     
-    # Normalize the data
-    scaler = MinMaxScaler()
-    scaled_data = scaler.fit_transform(df)
-    
-    return scaled_data, scaler
-
-if __name__ == "__main__":
-    scaled_data, scaler = preprocess_data('data/raw/stock_data.csv')
-    print(scaled_data[:10])
+    return np.array(X), np.array(y), scaler
