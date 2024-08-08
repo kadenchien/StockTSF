@@ -22,38 +22,74 @@ def get_news_sentiment(ticker, api_key, date):
     
     return sentiment_sum / min(len(articles), 10)
 
-def collect_data(ticker, start_date, end_date, newsapi_key):
+def get_balance_sheet(api_key, ticker, years):
+    url = f'https://www.alphavantage.co/query?function=BALANCE_SHEET&symbol={ticker}&apikey={api_key}'
+    response = requests.get(url)
+    data = response.json()
+    
+    if "annualReports" in data:
+        balance_sheets = pd.DataFrame(data["annualReports"])
+        balance_sheets['fiscalDateEnding'] = pd.to_datetime(balance_sheets['fiscalDateEnding'])
+        balance_sheets.set_index('fiscalDateEnding', inplace=True)
+        
+        # Get the most recent `years` years of data
+        balance_sheets = balance_sheets.head(years)
+        return balance_sheets
+    else:
+        print("Error fetching balance sheet data")
+        return None
+
+def get_financials(api_key, ticker, years):
+    url = f'https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={ticker}&apikey={api_key}'
+    response = requests.get(url)
+    data = response.json()
+    
+    if "annualReports" in data:
+        financials = pd.DataFrame(data["annualReports"])
+        financials['fiscalDateEnding'] = pd.to_datetime(financials['fiscalDateEnding'])
+        financials.set_index('fiscalDateEnding', inplace=True)
+        
+        # Get the most recent `years` years of data
+        financials = financials.head(years)
+        return financials
+    else:
+        print("Error fetching financials data")
+        return None
+
+def collect_data(ticker, start_date, end_date, newsapi_key, av_api_key, years):
     # Fetch stock data
     stock = yf.Ticker(ticker)
     stock_data = stock.history(start=start_date, end=end_date)
-
     stock_data.to_csv("stock_data.csv")
     
     # Ensure the stock_data index is timezone-naive
     stock_data.index = stock_data.index.tz_localize(None)
 
-    # Fetch financial ratios (quarterly)
-    financials = stock.quarterly_financials
-    balance_sheet = stock.quarterly_balance_sheet
-    # Calculate financial ratios
-    current_ratio = balance_sheet.loc['Current Assets'] / balance_sheet.loc['Current Liabilities']
-    debt_to_equity = balance_sheet.loc['Total Liabilities Net Minority Interest'] / balance_sheet.loc['Stockholders Equity']
-    roi = financials.loc['Net Income'] / balance_sheet.loc['Total Assets']
+    # Fetch financial ratios (annual balance sheet data from Alpha Vantage)
+    balance_sheet = get_balance_sheet(av_api_key, ticker, years)
+    financials = get_financials(av_api_key, ticker, years)
     
-    # Ensure all indices are timezone-naive
-    current_ratio.index = current_ratio.index.tz_localize(None)
-    debt_to_equity.index = debt_to_equity.index.tz_localize(None)
-    roi.index = roi.index.tz_localize(None)
+    if balance_sheet is not None and financials is not None:
+        current_ratio = balance_sheet['totalCurrentAssets'] / balance_sheet['totalCurrentLiabilities']
+        debt_to_equity = balance_sheet['totalLiabilities'] / balance_sheet['totalShareholderEquity']
+        roi = financials['netIncome'] / balance_sheet['totalAssets']
+        
+        # Ensure all indices are timezone-naive
+        current_ratio.index = current_ratio.index.tz_localize(None)
+        debt_to_equity.index = debt_to_equity.index.tz_localize(None)
+        roi.index = roi.index.tz_localize(None)
 
-    # Resample ratios to match daily stock data
-    current_ratio = current_ratio.resample('D').ffill()
-    debt_to_equity = debt_to_equity.resample('D').ffill()
-    roi = roi.resample('D').ffill()
+        # Resample ratios to match daily stock data
+        current_ratio = current_ratio.resample('D').ffill()
+        debt_to_equity = debt_to_equity.resample('D').ffill()
+        roi = roi.resample('D').ffill()
+        
+        # Combine stock data with ratios
+        combined_data = pd.concat([stock_data, current_ratio, debt_to_equity, roi], axis=1)
+        combined_data.columns = list(stock_data.columns) + ['CurrentRatio', 'DebtToEquity', 'ROI']
+    else:
+        combined_data = stock_data
     
-    # Combine stock data with ratios
-    combined_data = pd.concat([stock_data, current_ratio, debt_to_equity, roi], axis=1)
-    combined_data.columns = list(stock_data.columns) + ['CurrentRatio', 'DebtToEquity', 'ROI']
-
     # Add news sentiment data
     sentiment_data = []
     for date in combined_data.index:
@@ -69,5 +105,5 @@ def collect_data(ticker, start_date, end_date, newsapi_key):
 
 if __name__ == "__main__":
     # Collect data
-    data = collect_data(config.TICKER, config.START_DATE, config.END_DATE, config.NEWSAPI_KEY)
+    data = collect_data(config.TICKER, config.START_DATE, config.END_DATE, config.NEWSAPI_KEY, config.AV_API_KEY, config.YEARS)
     data.to_csv("data.csv")
